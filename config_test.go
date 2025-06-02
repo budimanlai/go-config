@@ -106,18 +106,18 @@ func TestGetArrayToStruct(t *testing.T) {
 }
 
 func TestReloadAndCallback(t *testing.T) {
-	writeFile("testdata/reload.conf", `
+	writeFile("testdata/reload2.conf", `
 [main]
 val = 1
 `)
 	cfg := config.Config{}
-	_ = cfg.Open("testdata/reload.conf")
+	_ = cfg.Open("testdata/reload2.conf")
 
 	called := false
 	cfg.SetOnReload(func() { called = true })
 
 	// Ubah file, lalu reload
-	writeFile("testdata/reload.conf", `
+	writeFile("testdata/reload2.conf", `
 [main]
 val = 2
 `)
