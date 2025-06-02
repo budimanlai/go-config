@@ -281,3 +281,32 @@ func (c *Config) GetArrayToStruct(prefix string, out interface{}) error {
 	}
 	return json.Unmarshal(b, out)
 }
+
+// GetArrayObject mengambil array of object dari config yang sudah di-flatten.
+// Contoh: jika JSON berisi "servers": [{"host":"a"},{"host":"b"}],
+// maka GetArrayObject("servers", []string{"host"}) akan mengembalikan:
+// []map[string]string{ {"host":"a"}, {"host":"b"} }
+// Contoh penggunaan:
+// servers := cfg.GetArrayObject("servers", []string{"host", "port"})
+// servers[0]["host"], servers[0]["port"], dst
+func (c *Config) GetArrayObject(prefix string, fields []string) []map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var arr []map[string]string
+	for i := 0; ; i++ {
+		obj := make(map[string]string)
+		found := false
+		for _, field := range fields {
+			key := fmt.Sprintf("%s.%d.%s", prefix, i, field)
+			if val, ok := c.storage[key]; ok {
+				obj[field] = val
+				found = true
+			}
+		}
+		if !found {
+			break
+		}
+		arr = append(arr, obj)
+	}
+	return arr
+}
