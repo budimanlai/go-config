@@ -2,10 +2,14 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+
+	"encoding/json"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -37,7 +41,14 @@ func (c *Config) Open(file ...string) error {
 
 	for _, obj := range c.file {
 		ff := NewFile(obj)
-		e := ff.Read(c)
+		ext := filepath.Ext(obj)
+
+		var e error
+		if ext == ".json" {
+			e = ff.ReadJSON(c)
+		} else {
+			e = ff.ReadIni(c)
+		}
 		if e != nil {
 			return e
 		}
@@ -153,7 +164,7 @@ func (c *Config) Reload() error {
 	c.storage = make(map[string]string)
 	for _, obj := range c.file {
 		ff := NewFile(obj)
-		e := ff.Read(c)
+		e := ff.ReadIni(c)
 		if e != nil {
 			return e
 		}
@@ -224,4 +235,49 @@ func (c *Config) WatchAndReload() error {
 	}()
 
 	return nil
+}
+
+func (c *Config) GetArrayString(prefix string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var arr []string
+	for i := 0; ; i++ {
+		key := fmt.Sprintf("%s.%d", prefix, i)
+		val, ok := c.storage[key]
+		if !ok {
+			break
+		}
+		arr = append(arr, val)
+	}
+	return arr
+}
+
+// GetArrayToStruct mengisi slice struct dari array object yang sudah di-flatten.
+// Contoh: GetArrayToStruct("servers", &[]Server{})
+func (c *Config) GetArrayToStruct(prefix string, out interface{}) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var arr []map[string]interface{}
+	for i := 0; ; i++ {
+		obj := make(map[string]interface{})
+		found := false
+		prefixIdx := fmt.Sprintf("%s.%d.", prefix, i)
+		for key, val := range c.storage {
+			if strings.HasPrefix(key, prefixIdx) {
+				field := strings.TrimPrefix(key, prefixIdx)
+				obj[field] = val
+				found = true
+			}
+		}
+		if !found {
+			break
+		}
+		arr = append(arr, obj)
+	}
+	// Marshal ke JSON, lalu unmarshal ke struct slice
+	b, err := json.Marshal(arr)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
 }

@@ -2,7 +2,9 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -24,7 +26,7 @@ func NewFile(name string) File {
 	}
 }
 
-func (f *File) Read(c *Config) error {
+func (f *File) ReadIni(c *Config) error {
 	fi, e := os.Open(f.filename)
 	if e != nil {
 		return e
@@ -32,7 +34,6 @@ func (f *File) Read(c *Config) error {
 	defer fi.Close()
 
 	fmt.Println(`Read config:`, f.filename)
-	c.file = append(c.file, f.filename)
 
 	scanner := bufio.NewScanner(fi)
 	regexLine := regexp.MustCompile(strLine)
@@ -50,24 +51,29 @@ func (f *File) Read(c *Config) error {
 			if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
 				val = val[1 : len(val)-1]
 			}
-			keyPath := root + "." + key
+			keyPath := key
+			if root != "" {
+				keyPath = root + "." + key
+			}
 			c.storage[keyPath] = val
 		} else if matches := regexRoot.FindStringSubmatch(strLine); len(matches) > 0 {
 			root = matches[2]
 		} else if matches := regexInclude.FindStringSubmatch(strLine); len(matches) >= 2 {
 			path := matches[1]
-
 			if !contains(c.file, path) {
 				f2 := NewFile(path)
-				e := f2.Read(c)
+				e := f2.ReadIni(c)
 				if e != nil {
 					return e
 				}
-				c.file = append(c.file, path)
+				// Hindari append ke c.file di sini
 			} else {
 				fmt.Println(`Skippp.. already read`, path)
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -80,4 +86,50 @@ func contains(s []string, str string) bool {
 	}
 
 	return false
+}
+
+// Membaca file JSON dan flatten ke storage
+func (f *File) ReadJSON(c *Config) error {
+	data, err := ioutil.ReadFile(f.filename)
+	if err != nil {
+		return err
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	flattenJSON("", m, c.storage)
+	return nil
+}
+
+func flattenJSON(prefix string, m map[string]interface{}, storage map[string]string) {
+	for k, v := range m {
+		key := k
+		if prefix != "" {
+			key = prefix + "." + k
+		}
+		switch val := v.(type) {
+		case map[string]interface{}:
+			flattenJSON(key, val, storage)
+		case []interface{}:
+			for i, item := range val {
+				arrKey := fmt.Sprintf("%s.%d", key, i)
+				switch itemVal := item.(type) {
+				case map[string]interface{}:
+					flattenJSON(arrKey, itemVal, storage)
+				case []interface{}:
+					// Nested array, flatten recursively
+					flattenJSON(arrKey, map[string]interface{}{"": itemVal}, storage)
+				default:
+					storage[arrKey] = fmt.Sprintf("%v", itemVal)
+				}
+			}
+		default:
+			storage[key] = fmt.Sprintf("%v", val)
+		}
+	}
 }
