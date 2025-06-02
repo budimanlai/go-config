@@ -15,10 +15,11 @@ import (
 )
 
 type Config struct {
-	storage  map[string]string
-	file     []string
-	mu       sync.RWMutex // Tambahkan mutex untuk thread safety
-	onReload func()       // Callback yang akan dipanggil setelah reload
+	storage     map[string]string
+	file        []string
+	mu          sync.RWMutex // Tambahkan mutex untuk thread safety
+	onReload    func()       // Callback yang akan dipanggil setelah reload
+	watcherOnce sync.Once    // Proteksi agar WatchAndReload hanya bisa dipanggil sekali
 }
 
 // SetOnReload untuk mendaftarkan callback yang akan dipanggil setelah reload
@@ -185,60 +186,65 @@ func (c *Config) Reload() error {
 // WatchAndReload akan memonitor file config dan otomatis reload jika file berubah.
 // Fungsi ini berjalan di goroutine, pastikan dipanggil sekali saja.
 func (c *Config) WatchAndReload() error {
-	c.mu.RLock()
-	files := append([]string{}, c.file...) // copy slice agar aman
-	c.mu.RUnlock()
+	var err error
+	c.watcherOnce.Do(func() {
+		c.mu.RLock()
+		files := append([]string{}, c.file...) // copy slice agar aman
+		c.mu.RUnlock()
 
-	if len(files) == 0 {
-		return errors.New("no config file to watch")
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-
-	for _, f := range files {
-		absPath, err := filepath.Abs(f)
-		if err != nil {
-			watcher.Close()
-			return err
+		if len(files) == 0 {
+			err = errors.New("no config file to watch")
+			return
 		}
-		err = watcher.Add(absPath)
-		if err != nil {
-			watcher.Close()
-			return err
-		}
-	}
 
-	go func() {
-		defer watcher.Close()
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				// Jika file diubah (write/rename/remove), reload config
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Rename == fsnotify.Rename {
-					if err := c.Reload(); err != nil {
-						log.Printf("Config reload error: %v", err)
-					} else {
-						log.Printf("Config reloaded: %s", event.Name)
-					}
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Printf("Watcher error: %v", err)
+		watcher, e := fsnotify.NewWatcher()
+		if e != nil {
+			err = e
+			return
+		}
+
+		for _, f := range files {
+			absPath, e := filepath.Abs(f)
+			if e != nil {
+				watcher.Close()
+				err = e
+				return
+			}
+			e = watcher.Add(absPath)
+			if e != nil {
+				watcher.Close()
+				err = e
+				return
 			}
 		}
-	}()
 
-	return nil
+		go func() {
+			defer watcher.Close()
+			for {
+				select {
+				case event, ok := <-watcher.Events:
+					if !ok {
+						return
+					}
+					if event.Op&fsnotify.Write == fsnotify.Write ||
+						event.Op&fsnotify.Create == fsnotify.Create ||
+						event.Op&fsnotify.Rename == fsnotify.Rename {
+						if err := c.Reload(); err != nil {
+							log.Printf("Config reload error: %v", err)
+						} else {
+							log.Printf("Config reloaded: %s", event.Name)
+						}
+					}
+				case err, ok := <-watcher.Errors:
+					if !ok {
+						return
+					}
+					log.Printf("Watcher error: %v", err)
+				}
+			}
+		}()
+	})
+	return err
 }
 
 func (c *Config) GetArrayString(prefix string) []string {
