@@ -35,9 +35,9 @@ func (c *Config) Open(file ...string) error {
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.storage = make(map[string]string)
 	c.file = file
+	c.mu.Unlock()
 
 	for _, obj := range c.file {
 		ff := NewFile(obj)
@@ -54,9 +54,7 @@ func (c *Config) Open(file ...string) error {
 		}
 	}
 
-	c.WatchAndReload()
-
-	return nil
+	return c.WatchAndReload()
 }
 
 // GetString retrieves a string property from the configuration.
@@ -164,7 +162,14 @@ func (c *Config) Reload() error {
 	c.storage = make(map[string]string)
 	for _, obj := range c.file {
 		ff := NewFile(obj)
-		e := ff.ReadIni(c)
+		ext := filepath.Ext(obj)
+
+		var e error
+		if ext == ".json" {
+			e = ff.ReadJSON(c)
+		} else {
+			e = ff.ReadIni(c)
+		}
 		if e != nil {
 			return e
 		}
@@ -193,7 +198,6 @@ func (c *Config) WatchAndReload() error {
 		return err
 	}
 
-	// Watch setiap file config
 	for _, f := range files {
 		absPath, err := filepath.Abs(f)
 		if err != nil {
@@ -265,7 +269,16 @@ func (c *Config) GetArrayToStruct(prefix string, out interface{}) error {
 		for key, val := range c.storage {
 			if strings.HasPrefix(key, prefixIdx) {
 				field := strings.TrimPrefix(key, prefixIdx)
-				obj[field] = val
+				// Coba konversi ke int, float64, bool, jika gagal tetap string
+				if ival, err := strconv.Atoi(val); err == nil {
+					obj[field] = ival
+				} else if fval, err := strconv.ParseFloat(val, 64); err == nil {
+					obj[field] = fval
+				} else if bval, err := strconv.ParseBool(val); err == nil {
+					obj[field] = bval
+				} else {
+					obj[field] = val
+				}
 				found = true
 			}
 		}
@@ -299,6 +312,35 @@ func (c *Config) GetArrayObject(prefix string, fields []string) []map[string]str
 		for _, field := range fields {
 			key := fmt.Sprintf("%s.%d.%s", prefix, i, field)
 			if val, ok := c.storage[key]; ok {
+				obj[field] = val
+				found = true
+			}
+		}
+		if !found {
+			break
+		}
+		arr = append(arr, obj)
+	}
+	return arr
+}
+
+// GetArrayObjectAuto mengambil array of object dari config yang sudah di-flatten
+// tanpa perlu menentukan field-nya. Fungsi ini akan otomatis mencari semua field
+// yang ada pada setiap objek berdasarkan prefix yang diberikan.
+// Contoh: jika JSON berisi "servers": [{"host":"a"},{"host":"b"}],
+// maka GetArrayObjectAuto("servers") akan mengembalikan:
+// []map[string]interface{}{{"host":"a"}, {"host":"b"}}
+func (c *Config) GetArrayObjectAuto(prefix string) []map[string]interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var arr []map[string]interface{}
+	for i := 0; ; i++ {
+		obj := make(map[string]interface{})
+		found := false
+		prefixIdx := fmt.Sprintf("%s.%d.", prefix, i)
+		for key, val := range c.storage {
+			if strings.HasPrefix(key, prefixIdx) {
+				field := strings.TrimPrefix(key, prefixIdx)
 				obj[field] = val
 				found = true
 			}

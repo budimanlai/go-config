@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -32,8 +31,6 @@ func (f *File) ReadIni(c *Config) error {
 		return e
 	}
 	defer fi.Close()
-
-	fmt.Println(`Read config:`, f.filename)
 
 	scanner := bufio.NewScanner(fi)
 	regexLine := regexp.MustCompile(strLine)
@@ -90,7 +87,7 @@ func contains(s []string, str string) bool {
 
 // Membaca file JSON dan flatten ke storage
 func (f *File) ReadJSON(c *Config) error {
-	data, err := ioutil.ReadFile(f.filename)
+	data, err := os.ReadFile(f.filename)
 	if err != nil {
 		return err
 	}
@@ -100,8 +97,6 @@ func (f *File) ReadJSON(c *Config) error {
 		return err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	flattenJSON("", m, c.storage)
 	return nil
 }
