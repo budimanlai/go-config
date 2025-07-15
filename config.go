@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -8,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"encoding/json"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -357,4 +356,53 @@ func (c *Config) GetArrayObjectAuto(prefix string) []map[string]interface{} {
 		arr = append(arr, obj)
 	}
 	return arr
+}
+
+// GetAll mengembalikan copy dari semua setting yang sudah di-load.
+// Mengembalikan map[string]string yang berisi semua key-value pairs.
+func (c *Config) GetAll() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Buat copy dari storage untuk mencegah modifikasi dari luar
+	result := make(map[string]string, len(c.storage))
+	for key, value := range c.storage {
+		result[key] = value
+	}
+	return result
+}
+
+// GetAllAsInterface mengembalikan copy dari semua setting yang sudah di-load
+// dengan mencoba mengkonversi nilai ke tipe data yang sesuai (int, float64, bool, string).
+// Mengembalikan map[string]interface{} yang berisi semua key-value pairs.
+func (c *Config) GetAllAsInterface() map[string]interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Buat copy dari storage dengan konversi tipe data
+	result := make(map[string]interface{}, len(c.storage))
+	for key, value := range c.storage {
+		// Coba konversi ke tipe data yang sesuai
+		if ival, err := strconv.Atoi(value); err == nil {
+			result[key] = ival
+		} else if fval, err := strconv.ParseFloat(value, 64); err == nil {
+			result[key] = fval
+		} else if bval, err := strconv.ParseBool(value); err == nil {
+			result[key] = bval
+		} else {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+// GetAllAsJSON mengembalikan semua setting dalam format JSON string.
+// Nilai akan dikonversi ke tipe data yang sesuai sebelum di-marshal ke JSON.
+func (c *Config) GetAllAsJSON() (string, error) {
+	data := c.GetAllAsInterface()
+	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
 }
