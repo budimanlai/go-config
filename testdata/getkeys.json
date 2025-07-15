@@ -1,0 +1,10 @@
+
+{
+  "app": {
+    "name": "testapp",
+    "port": 8080
+  },
+  "database": {
+    "host": "localhost"
+  }
+}

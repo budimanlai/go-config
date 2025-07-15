@@ -1,0 +1,12 @@
+
+{
+  "app": {
+    "name": "testapp",
+    "port": 8080,
+    "debug": true
+  },
+  "database": {
+    "host": "localhost",
+    "timeout": 30.5
+  }
+}

@@ -1,0 +1,8 @@
+
+{
+  "app": {
+    "name": "testapp",
+    "port": 8080,
+    "debug": true
+  }
+}

@@ -406,3 +406,15 @@ func (c *Config) GetAllAsJSON() (string, error) {
 	}
 	return string(jsonBytes), nil
 }
+
+// GetAllKeys mengembalikan slice yang berisi semua key yang tersedia di config.
+func (c *Config) GetAllKeys() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	keys := make([]string, 0, len(c.storage))
+	for key := range c.storage {
+		keys = append(keys, key)
+	}
+	return keys
+}
