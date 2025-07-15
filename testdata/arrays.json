@@ -1,0 +1,12 @@
+
+{
+  "app": {
+    "name": "testapp",
+    "tags": ["web", "api", "service"]
+  },
+  "servers": [
+    {"host": "server1", "port": 8080},
+    {"host": "server2", "port": 8081}
+  ],
+  "numbers": [1, 2, 3, 4, 5]
+}

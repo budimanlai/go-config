@@ -1,0 +1,13 @@
+
+{
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "enabled": true
+  },
+  "app": {
+    "name": "myapp",
+    "version": 1.5,
+    "debug": false
+  }
+}

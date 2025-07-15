@@ -1,0 +1,10 @@
+{
+		"string_id": "12345",
+		"int_value": 42,
+		"float_value": 3.14,
+		"bool_flag": true,
+		"items": [
+			{"id": "1", "value": 100},
+			{"id": "2", "value": 200}
+		]
+	}

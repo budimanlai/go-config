@@ -1,0 +1,8 @@
+{
+		"app": {"name": "perf-test", "version": "1.0"},
+		"items": [
+			{"id": "1", "value": 100},
+			{"id": "2", "value": 200},
+			{"id": "3", "value": 300}
+		]
+	}

@@ -114,8 +114,8 @@ val = 1
 	cfg := config.Config{}
 	_ = cfg.Open("testdata/reload2.conf")
 
-	called := false
-	cfg.SetOnReload(func() { called = true })
+	called := make(chan bool, 1)
+	cfg.SetOnReload(func() { called <- true })
 
 	// Ubah file, lalu reload
 	writeFile("testdata/reload2.conf", `
@@ -123,7 +123,14 @@ val = 1
 val = 2
 `)
 	_ = cfg.Reload()
-	assert.True(t, called)
+
+	// Tunggu callback dipanggil (dengan timeout)
+	select {
+	case <-called:
+		// OK, callback dipanggil
+	case <-time.After(1 * time.Second):
+		t.Error("reload callback not called")
+	}
 	assert.Equal(t, 2, cfg.GetInt("main.val"))
 }
 
@@ -277,4 +284,532 @@ func TestGetAllAsJSON(t *testing.T) {
 	assert.Equal(t, "testapp", parsed["app.name"])
 	assert.Equal(t, float64(8080), parsed["app.port"]) // JSON numbers are float64
 	assert.Equal(t, true, parsed["app.debug"])
+}
+
+func TestMapToStruct(t *testing.T) {
+	writeFile("testdata/mapstruct.json", `
+{
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "enabled": true
+  },
+  "app": {
+    "name": "myapp",
+    "version": 1.5,
+    "debug": false
+  }
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/mapstruct.json")
+
+	// Test MapToStruct with nested structure
+	type AppConfig struct {
+		DatabaseHost    string  `json:"database.host"`
+		DatabasePort    int     `json:"database.port"`
+		DatabaseEnabled bool    `json:"database.enabled"`
+		AppName         string  `json:"app.name"`
+		AppVersion      float64 `json:"app.version"`
+		AppDebug        bool    `json:"app.debug"`
+	}
+
+	var appConfig AppConfig
+	err := cfg.MapToStruct(&appConfig)
+	assert.NoError(t, err)
+	assert.Equal(t, "localhost", appConfig.DatabaseHost)
+	assert.Equal(t, 3306, appConfig.DatabasePort)
+	assert.Equal(t, true, appConfig.DatabaseEnabled)
+	assert.Equal(t, "myapp", appConfig.AppName)
+	assert.Equal(t, 1.5, appConfig.AppVersion)
+	assert.Equal(t, false, appConfig.AppDebug)
+}
+
+func TestMapToStructFlat(t *testing.T) {
+	writeFile("testdata/mapflat.json", `
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "timeout": 30.5,
+    "ssl": true
+  },
+  "app": {
+    "name": "testapp",
+    "workers": 4
+  }
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/mapflat.json")
+
+	// Test MapToStructFlat with flat structure
+	type FlatConfig struct {
+		ServerHost    string  `json:"server.host"`
+		ServerPort    int     `json:"server.port"`
+		ServerTimeout float64 `json:"server.timeout"`
+		ServerSSL     bool    `json:"server.ssl"`
+		AppName       string  `json:"app.name"`
+		AppWorkers    int     `json:"app.workers"`
+		NotExists     string  `json:"not.exists"` // This should remain empty
+	}
+
+	var flatConfig FlatConfig
+	err := cfg.MapToStructFlat(&flatConfig)
+	assert.NoError(t, err)
+	assert.Equal(t, "127.0.0.1", flatConfig.ServerHost)
+	assert.Equal(t, 8080, flatConfig.ServerPort)
+	assert.Equal(t, 30.5, flatConfig.ServerTimeout)
+	assert.Equal(t, true, flatConfig.ServerSSL)
+	assert.Equal(t, "testapp", flatConfig.AppName)
+	assert.Equal(t, 4, flatConfig.AppWorkers)
+	assert.Equal(t, "", flatConfig.NotExists) // Should be empty since key doesn't exist
+}
+
+func TestMapToStructError(t *testing.T) {
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/test.conf")
+
+	// Test error cases
+	var notAPointer string
+	err := cfg.MapToStructFlat(notAPointer)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "output must be a pointer to struct")
+
+	var notAStruct *string
+	err = cfg.MapToStructFlat(notAStruct)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "output must be a pointer to struct")
+}
+
+func TestMapToStructNested(t *testing.T) {
+	writeFile("testdata/nested.json", `
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "enabled": true,
+    "timeout": 30.5
+  },
+  "app": {
+    "name": "myapp",
+    "version": "1.0.0",
+    "debug": false,
+    "workers": 4
+  },
+  "cache": {
+    "redis": {
+      "host": "redis-server",
+      "port": 6379
+    }
+  }
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/nested.json")
+
+	// Test nested structure mapping
+	type DatabaseConfig struct {
+		Host    string  `json:"host"`
+		Port    int     `json:"port"`
+		Enabled bool    `json:"enabled"`
+		Timeout float64 `json:"timeout"`
+	}
+
+	type AppConfig struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		Debug   bool   `json:"debug"`
+		Workers int    `json:"workers"`
+	}
+
+	type RedisConfig struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+
+	type CacheConfig struct {
+		Redis RedisConfig `json:"redis"`
+	}
+
+	type Config struct {
+		Database DatabaseConfig `json:"database"`
+		App      AppConfig      `json:"app"`
+		Cache    CacheConfig    `json:"cache"`
+	}
+
+	var nestedConfig Config
+	err := cfg.MapToStructNested(&nestedConfig)
+	assert.NoError(t, err)
+
+	// Verify database config
+	assert.Equal(t, "localhost", nestedConfig.Database.Host)
+	assert.Equal(t, 5432, nestedConfig.Database.Port)
+	assert.Equal(t, true, nestedConfig.Database.Enabled)
+	assert.Equal(t, 30.5, nestedConfig.Database.Timeout)
+
+	// Verify app config
+	assert.Equal(t, "myapp", nestedConfig.App.Name)
+	assert.Equal(t, "1.0.0", nestedConfig.App.Version)
+	assert.Equal(t, false, nestedConfig.App.Debug)
+	assert.Equal(t, 4, nestedConfig.App.Workers)
+
+	// Verify nested cache config
+	assert.Equal(t, "redis-server", nestedConfig.Cache.Redis.Host)
+	assert.Equal(t, 6379, nestedConfig.Cache.Redis.Port)
+}
+
+func TestMapToStructAdvanced(t *testing.T) {
+	writeFile("testdata/advanced.json", `
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "ssl": true
+  },
+  "database": {
+    "host": "db-server",
+    "port": 3306
+  }
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/advanced.json")
+
+	// Test 1: Nested structure (should use nested mapping)
+	type ServerConfig struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+		SSL  bool   `json:"ssl"`
+	}
+
+	type DatabaseConfig struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+
+	type NestedConfig struct {
+		Server   ServerConfig   `json:"server"`
+		Database DatabaseConfig `json:"database"`
+	}
+
+	var nestedConfig NestedConfig
+	err := cfg.MapToStructAdvanced(&nestedConfig)
+	assert.NoError(t, err)
+	assert.Equal(t, "0.0.0.0", nestedConfig.Server.Host)
+	assert.Equal(t, 8080, nestedConfig.Server.Port)
+	assert.Equal(t, true, nestedConfig.Server.SSL)
+	assert.Equal(t, "db-server", nestedConfig.Database.Host)
+	assert.Equal(t, 3306, nestedConfig.Database.Port)
+
+	// Test 2: Flat structure (should use flat mapping)
+	type FlatConfig struct {
+		ServerHost   string `json:"server.host"`
+		ServerPort   int    `json:"server.port"`
+		ServerSSL    bool   `json:"server.ssl"`
+		DatabaseHost string `json:"database.host"`
+		DatabasePort int    `json:"database.port"`
+	}
+
+	var flatConfig FlatConfig
+	err = cfg.MapToStructAdvanced(&flatConfig)
+	assert.NoError(t, err)
+	assert.Equal(t, "0.0.0.0", flatConfig.ServerHost)
+	assert.Equal(t, 8080, flatConfig.ServerPort)
+	assert.Equal(t, true, flatConfig.ServerSSL)
+	assert.Equal(t, "db-server", flatConfig.DatabaseHost)
+	assert.Equal(t, 3306, flatConfig.DatabasePort)
+}
+
+func TestFlatToNested(t *testing.T) {
+	writeFile("testdata/flatnested.json", `
+{
+  "level1": {
+    "level2": {
+      "level3": {
+        "value": "deep"
+      }
+    }
+  },
+  "simple": "value"
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/flatnested.json")
+
+	// Test konversi flat ke nested secara internal
+	nestedData := cfg.GetAllAsInterface()
+
+	// Verify struktur nested terbentuk dengan benar
+	assert.Contains(t, nestedData, "level1.level2.level3.value")
+	assert.Contains(t, nestedData, "simple")
+	assert.Equal(t, "deep", nestedData["level1.level2.level3.value"])
+	assert.Equal(t, "value", nestedData["simple"])
+}
+
+func TestMapToStructWithArrays(t *testing.T) {
+	writeFile("testdata/arrays.json", `
+{
+  "app": {
+    "name": "testapp",
+    "tags": ["web", "api", "service"]
+  },
+  "servers": [
+    {"host": "server1", "port": 8080},
+    {"host": "server2", "port": 8081}
+  ],
+  "numbers": [1, 2, 3, 4, 5]
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/arrays.json")
+
+	// Test 1: Nested structure dengan array
+	type Server struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+
+	type AppConfig struct {
+		App struct {
+			Name string   `json:"name"`
+			Tags []string `json:"tags"`
+		} `json:"app"`
+		Servers []Server `json:"servers"`
+		Numbers []int    `json:"numbers"`
+	}
+
+	var config AppConfig
+	err := cfg.MapToStructNested(&config)
+	assert.NoError(t, err)
+
+	// Verify app config
+	assert.Equal(t, "testapp", config.App.Name)
+	assert.Equal(t, []string{"web", "api", "service"}, config.App.Tags)
+
+	// Verify servers array
+	assert.Len(t, config.Servers, 2)
+	assert.Equal(t, "server1", config.Servers[0].Host)
+	assert.Equal(t, 8080, config.Servers[0].Port)
+	assert.Equal(t, "server2", config.Servers[1].Host)
+	assert.Equal(t, 8081, config.Servers[1].Port)
+
+	// Verify numbers array
+	assert.Equal(t, []int{1, 2, 3, 4, 5}, config.Numbers)
+}
+
+func TestMapToStructWithFlatArrays(t *testing.T) {
+	writeFile("testdata/flatarray.json", `
+{
+  "app": {
+    "name": "testapp"
+  },
+  "servers": [
+    {"host": "server1", "port": 8080},
+    {"host": "server2", "port": 8081}
+  ]
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/flatarray.json")
+
+	// Test flat mapping dengan array elements
+	type FlatArrayConfig struct {
+		AppName     string `json:"app.name"`
+		Server0Host string `json:"servers.0.host"`
+		Server0Port int    `json:"servers.0.port"`
+		Server1Host string `json:"servers.1.host"`
+		Server1Port int    `json:"servers.1.port"`
+	}
+
+	var config FlatArrayConfig
+	err := cfg.MapToStructFlat(&config)
+	assert.NoError(t, err)
+	assert.Equal(t, "testapp", config.AppName)
+	assert.Equal(t, "server1", config.Server0Host)
+	assert.Equal(t, 8080, config.Server0Port)
+	assert.Equal(t, "server2", config.Server1Host)
+	assert.Equal(t, 8081, config.Server1Port)
+}
+
+func TestMapToStructWithComplexObjects(t *testing.T) {
+	writeFile("testdata/complex.json", `
+{
+  "database": {
+    "primary": {
+      "host": "primary-db",
+      "port": 5432,
+      "config": {
+        "max_connections": 100,
+        "timeout": 30.5,
+        "ssl": true
+      }
+    },
+    "replicas": [
+      {
+        "host": "replica1",
+        "port": 5432,
+        "weight": 1
+      },
+      {
+        "host": "replica2", 
+        "port": 5432,
+        "weight": 2
+      }
+    ]
+  },
+  "cache": {
+    "redis": {
+      "clusters": [
+        {"host": "redis1", "port": 6379},
+        {"host": "redis2", "port": 6379}
+      ]
+    }
+  }
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/complex.json")
+
+	// Test complex nested structure
+	type DBConfig struct {
+		MaxConnections int     `json:"max_connections"`
+		Timeout        float64 `json:"timeout"`
+		SSL            bool    `json:"ssl"`
+	}
+
+	type DatabaseServer struct {
+		Host   string   `json:"host"`
+		Port   int      `json:"port"`
+		Config DBConfig `json:"config,omitempty"`
+		Weight int      `json:"weight,omitempty"`
+	}
+
+	type RedisCluster struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+
+	type ComplexConfig struct {
+		Database struct {
+			Primary  DatabaseServer   `json:"primary"`
+			Replicas []DatabaseServer `json:"replicas"`
+		} `json:"database"`
+		Cache struct {
+			Redis struct {
+				Clusters []RedisCluster `json:"clusters"`
+			} `json:"redis"`
+		} `json:"cache"`
+	}
+
+	var config ComplexConfig
+	err := cfg.MapToStructNested(&config)
+	assert.NoError(t, err)
+
+	// Verify primary database config
+	assert.Equal(t, "primary-db", config.Database.Primary.Host)
+	assert.Equal(t, 5432, config.Database.Primary.Port)
+	assert.Equal(t, 100, config.Database.Primary.Config.MaxConnections)
+	assert.Equal(t, 30.5, config.Database.Primary.Config.Timeout)
+	assert.Equal(t, true, config.Database.Primary.Config.SSL)
+
+	// Verify replicas
+	assert.Len(t, config.Database.Replicas, 2)
+	assert.Equal(t, "replica1", config.Database.Replicas[0].Host)
+	assert.Equal(t, 1, config.Database.Replicas[0].Weight)
+	assert.Equal(t, "replica2", config.Database.Replicas[1].Host)
+	assert.Equal(t, 2, config.Database.Replicas[1].Weight)
+
+	// Verify redis clusters
+	assert.Len(t, config.Cache.Redis.Clusters, 2)
+	assert.Equal(t, "redis1", config.Cache.Redis.Clusters[0].Host)
+	assert.Equal(t, 6379, config.Cache.Redis.Clusters[0].Port)
+	assert.Equal(t, "redis2", config.Cache.Redis.Clusters[1].Host)
+	assert.Equal(t, 6379, config.Cache.Redis.Clusters[1].Port)
+}
+
+func TestDebugArrayStructure(t *testing.T) {
+	writeFile("testdata/debug.json", `
+{
+  "simple": ["a", "b", "c"],
+  "numbers": [1, 2, 3]
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/debug.json")
+
+	// Debug: lihat struktur flat storage
+	allData := cfg.GetAll()
+	t.Logf("Flat storage: %+v", allData)
+
+	// Debug: lihat hasil nested conversion
+	nestedData := cfg.GetAllAsInterface() // Ini masih flat
+	t.Logf("GetAllAsInterface: %+v", nestedData)
+
+	// Test simple nested structure
+	type SimpleConfig struct {
+		Simple  []string `json:"simple"`
+		Numbers []int    `json:"numbers"`
+	}
+
+	var config SimpleConfig
+	err := cfg.MapToStructNested(&config)
+	t.Logf("MapToStructNested error: %v", err)
+	t.Logf("Result: %+v", config)
+}
+
+func TestMapToStructNestedStringNumbers(t *testing.T) {
+	writeFile("testdata/stringnumbers.json", `
+{
+  "user": {
+    "id": "1234567",
+    "phone": "08123456789", 
+    "age": 25,
+    "name": "John Doe"
+  },
+  "product": {
+    "sku": "PROD001",
+    "barcode": "1234567890123",
+    "price": 99.99,
+    "stock": 100
+  }
+}
+`)
+	cfg := config.Config{}
+	_ = cfg.Open("testdata/stringnumbers.json")
+
+	// Test struct dengan string field yang berisi angka
+	type UserConfig struct {
+		ID    string `json:"id"`    // String yang berisi angka
+		Phone string `json:"phone"` // String yang berisi angka
+		Age   int    `json:"age"`   // Integer asli
+		Name  string `json:"name"`  // String biasa
+	}
+
+	type ProductConfig struct {
+		SKU     string  `json:"sku"`     // String biasa
+		Barcode string  `json:"barcode"` // String yang berisi angka panjang
+		Price   float64 `json:"price"`   // Float asli
+		Stock   int     `json:"stock"`   // Integer asli
+	}
+
+	type Config struct {
+		User    UserConfig    `json:"user"`
+		Product ProductConfig `json:"product"`
+	}
+
+	var config Config
+	err := cfg.MapToStructNested(&config)
+	assert.NoError(t, err)
+
+	// Verify string fields yang berisi angka tetap string
+	assert.Equal(t, "1234567", config.User.ID)        // Harus string, bukan int
+	assert.Equal(t, "08123456789", config.User.Phone) // Harus string, bukan int
+	assert.Equal(t, 25, config.User.Age)              // Boleh int
+	assert.Equal(t, "John Doe", config.User.Name)     // String biasa
+
+	assert.Equal(t, "PROD001", config.Product.SKU)           // String biasa
+	assert.Equal(t, "1234567890123", config.Product.Barcode) // Harus string, bukan int
+	assert.Equal(t, 99.99, config.Product.Price)             // Boleh float
+	assert.Equal(t, 100, config.Product.Stock)               // Boleh int
 }

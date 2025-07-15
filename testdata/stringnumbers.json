@@ -1,0 +1,15 @@
+
+{
+  "user": {
+    "id": "1234567",
+    "phone": "08123456789", 
+    "age": 25,
+    "name": "John Doe"
+  },
+  "product": {
+    "sku": "PROD001",
+    "barcode": "1234567890123",
+    "price": 99.99,
+    "stock": 100
+  }
+}

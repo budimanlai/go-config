@@ -1,0 +1,10 @@
+{
+		"app": {"name": "benchmark-app", "version": "2.0", "debug": true},
+		"database": {"host": "localhost", "port": 5432, "ssl": true},
+		"cache": {"ttl": 3600, "size": 1000},
+		"servers": [
+			{"name": "web1", "port": 8080, "active": true},
+			{"name": "web2", "port": 8081, "active": false},
+			{"name": "api1", "port": 9090, "active": true}
+		]
+	}

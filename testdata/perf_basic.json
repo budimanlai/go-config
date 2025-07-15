@@ -1,0 +1,4 @@
+{
+		"app": {"name": "test", "version": "1.0"},
+		"db": {"host": "localhost", "port": 5432}
+	}

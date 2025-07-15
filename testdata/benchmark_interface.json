@@ -1,0 +1,7 @@
+{
+		"string_field": "test",
+		"int_field": 123,
+		"float_field": 45.67,
+		"bool_field": true,
+		"nested": {"key": "value", "number": 999}
+	}

@@ -1,0 +1,34 @@
+
+{
+  "database": {
+    "primary": {
+      "host": "primary-db",
+      "port": 5432,
+      "config": {
+        "max_connections": 100,
+        "timeout": 30.5,
+        "ssl": true
+      }
+    },
+    "replicas": [
+      {
+        "host": "replica1",
+        "port": 5432,
+        "weight": 1
+      },
+      {
+        "host": "replica2", 
+        "port": 5432,
+        "weight": 2
+      }
+    ]
+  },
+  "cache": {
+    "redis": {
+      "clusters": [
+        {"host": "redis1", "port": 6379},
+        {"host": "redis2", "port": 6379}
+      ]
+    }
+  }
+}

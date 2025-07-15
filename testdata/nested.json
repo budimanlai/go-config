@@ -1,0 +1,21 @@
+
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "enabled": true,
+    "timeout": 30.5
+  },
+  "app": {
+    "name": "myapp",
+    "version": "1.0.0",
+    "debug": false,
+    "workers": 4
+  },
+  "cache": {
+    "redis": {
+      "host": "redis-server",
+      "port": 6379
+    }
+  }
+}

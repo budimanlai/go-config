@@ -1,0 +1,10 @@
+
+{
+  "app": {
+    "name": "testapp"
+  },
+  "servers": [
+    {"host": "server1", "port": 8080},
+    {"host": "server2", "port": 8081}
+  ]
+}
